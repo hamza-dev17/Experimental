@@ -28,9 +28,13 @@ Each project will be available under:
 
 ```text
 .
+├── CONTRIBUTING.md
 ├── index.html
 ├── README.md
 └── projects
+    ├── _template
+    │   ├── index.html
+    │   └── README.md
     ├── burst
     │   ├── index.html
     │   └── README.md
@@ -44,6 +48,12 @@ Each project will be available under:
         ├── index.html
         └── README.md
 ```
+
+## Adding New Projects
+
+- Start from `projects/_template`.
+- Follow the checklist in `CONTRIBUTING.md`.
+- Keep project folders in lowercase kebab-case.
 
 ## Notes
 
