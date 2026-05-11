@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holographic Celestial Gate</title>
+    
+    <style>
+        body { margin:0; overflow:hidden; background:#050510; font-family:Segoe UI, sans-serif; }
+        canvas { display:block; }
+        #ui{
+            position:absolute; top:20px; left:20px;
+            color:white; pointer-events:none;
+            text-shadow:0 0 15px rgba(0,0,0,1);
+        }
+        h1{ margin:0; font-weight:300; letter-spacing:4px;}
+        span{ color:#00ffff; text-shadow:0 0 20px #00ffff;}
+        p{ opacity:0.7;}
+        video{ display:none;}
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>CELESTIAL <span>GATE</span></h1>
+        <p id="instruction">Show two hands and pull apart to reveal the hologram.</p>
+    </div>
+
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1,1,1,-1,0,10);
+        camera.position.z = 5;
+        const renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setSize(window.innerWidth,window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene,camera));
+
+        const bloom = new THREE.UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth,window.innerHeight),
+            2.0,
+            0.4,
+            0.85
+        );
+        composer.addPass(bloom);
+
+        const material = new THREE.ShaderMaterial({
+            uniforms:{
+                uTime:{value:0},
+                uResolution:{value:new THREE.Vector2(window.innerWidth,window.innerHeight)},
+                uHand1:{value:new THREE.Vector2(0.4, 0.5)},
+                uHand2:{value:new THREE.Vector2(0.6, 0.5)},
+                uRadius:{value:0},
+                uVelocity:{value:0}
+            },
+            vertexShader:`
+                varying vec2 vUv;
+                void main(){
+                    vUv=uv;
+                    gl_Position=vec4(position,1.0);
+                }
+            `,
+            fragmentShader:`
+                uniform float uTime;
+                uniform vec2 uResolution;
+                uniform vec2 uHand1;
+                uniform vec2 uHand2;
+                uniform float uRadius;
+                uniform float uVelocity;
+                varying vec2 vUv;
+
+                mat2 rot(float a){ return mat2(cos(a),-sin(a),sin(a),cos(a)); }
+
+                float random(vec2 st){ return fract(sin(dot(st.xy,vec2(12.9898,78.233)))*43758.5453123); }
+
+                float noise(vec2 st){
+                    vec2 i=floor(st); vec2 f=fract(st);
+                    float a=random(i); float b=random(i+vec2(1,0));
+                    float c=random(i+vec2(0,1)); float d=random(i+vec2(1,1));
+                    vec2 u=f*f*(3.0-2.0*f);
+                    return mix(a,b,u.x)+(c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y;
+                }
+
+                float fbm(vec2 st){
+                    float v=0.; float a=.5;
+                    for(int i=0;i<5;i++){ v+=a*noise(st); st=rot(.5)*st*2.; a*=.5; }
+                    return v;
+                }
+
+                float sdLine(vec2 p, vec2 a, vec2 b){
+                    vec2 pa=p-a, ba=b-a;
+                    float ba_length_sq = dot(ba,ba);
+                    if(ba_length_sq < 0.00001) return length(p-a);
+                    float h=clamp(dot(pa,ba)/ba_length_sq, 0.0, 1.0);
+                    return length(pa-ba*h);
+                }
+
+                void main(){
+                    vec2 uv=vUv;
+                    uv.x*=uResolution.x/uResolution.y;
+
+                    vec2 h1=uHand1; h1.x*=uResolution.x/uResolution.y;
+                    vec2 h2=uHand2; h2.x*=uResolution.x/uResolution.y;
+
+                    vec3 sceneA=vec3(0.01,0.02,0.05);
+                    float vignette=smoothstep(1.2,0.2,length(vUv-.5));
+                    sceneA*=vignette;
+
+                    vec3 nebula=vec3(0.0);
+                    for(int i=0;i<3;i++){
+                        float depth=float(i)*0.3;
+                        vec2 layerUv=vUv*(2.0+depth)+uTime*0.02*(1.0+depth);
+                        float n=fbm(layerUv*3.0);
+                        vec3 c1=vec3(0.1,0.6,1.0); vec3 c2=vec3(0.9,0.2,1.0);
+                        nebula+=mix(c1,c2,n)*n*(0.7-depth);
+                    }
+
+                    float veins=abs(sin(fbm(vUv*8.0+uTime)*6.2831));
+                    veins=smoothstep(0.8,1.0,veins);
+                    nebula+=vec3(0.2,1.0,0.9)*veins*1.5;
+
+                    float star=step(0.995,random(floor(vUv*60.0)));
+                    nebula+=vec3(1.0,0.9,0.7)*star;
+
+                    vec2 center=(h1+h2)*0.5;
+                    vec2 rayDir=normalize(vUv-center);
+                    float rays=0.;
+                    for(int i=0;i<8;i++){
+                        float t=float(i)/8.;
+                        vec2 sampleUv=vUv-rayDir*t*.4;
+                        rays+=fbm(sampleUv*5.+uTime*.2);
+                    }
+                    rays/=8.;
+                    nebula+=vec3(0.6,0.9,1.0)*rays*0.6;
+
+                    float d=sdLine(uv,h1,h2);
+                    float turbulence=4.0+(uVelocity*40.0);
+                    float edgeNoise=(fbm(vUv*turbulence-uTime)-0.5)*0.15;
+                    float dist=d+edgeNoise;
+
+                    float mask=1.0-smoothstep(uRadius,uRadius+0.03,dist);
+                    float glow=1.0-smoothstep(uRadius+0.02,uRadius+0.2,dist);
+                    float pureEdge=max(0.,glow-mask);
+
+                    vec3 finalColor=mix(sceneA,nebula,mask);
+                    float pulse=1.0+sin(uTime*3.0)*0.3;
+                    finalColor+=vec3(0.4,0.9,1.0)*pureEdge*pulse*3.0;
+
+                    finalColor=finalColor/(finalColor+vec3(1.0));
+                    finalColor=pow(finalColor,vec3(0.9));
+
+                    gl_FragColor=vec4(finalColor,1.0);
+                }
+            `
+        });
+
+        const bgGeometry = new THREE.PlaneGeometry(2,2);
+        const bgMesh = new THREE.Mesh(bgGeometry, material);
+        bgMesh.position.z = -1;
+        scene.add(bgMesh);
+
+        const hologramGroup = new THREE.Group();
+        scene.add(hologramGroup);
+
+        const holoMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ffff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.6,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const magentaHoloMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff00ff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const outerRing = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.02, 16, 64), holoMaterial);
+        const innerRing = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.015, 16, 64), magentaHoloMaterial);
+        innerRing.rotation.x = Math.PI / 2;
+        const coreGem = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 1), holoMaterial);
+
+        hologramGroup.add(outerRing, innerRing, coreGem);
+
+        const video = document.getElementById("webcam");
+
+        const hands = new Hands({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+
+        let hand1Target = new THREE.Vector2(0.4, 0.5);
+        let hand2Target = new THREE.Vector2(0.6, 0.5);
+        let prevHand = new THREE.Vector2(0.5, 0.5);
+        let targetRadius = 0;
+        let currentRadius = 0;
+        let targetVelocity = 0;
+        let currentVelocity = 0;
+
+        hands.onResults(results => {
+            if(results.multiHandLandmarks && results.multiHandLandmarks.length === 2){
+                const h1 = results.multiHandLandmarks[0];
+                const h2 = results.multiHandLandmarks[1];
+
+                hand1Target.set(1 - h1[9].x, 1 - h1[9].y);
+                hand2Target.set(1 - h2[9].x, 1 - h2[9].y);
+
+                const dist = hand1Target.distanceTo(hand2Target);
+                targetRadius = dist * 0.5;
+
+                targetVelocity = hand1Target.distanceTo(prevHand);
+                prevHand.copy(hand1Target);
+            } else {
+                targetRadius = 0;
+                targetVelocity *= 0.9;
+            }
+        });
+
+        const cam = new Camera(video, {
+            onFrame: async () => { await hands.send({image: video}); },
+            width: 640, height: 480
+        });
+        cam.start();
+
+        const clock = new THREE.Clock();
+
+        function animate(){
+            requestAnimationFrame(animate);
+
+            const t = clock.getElapsedTime();
+
+            currentRadius += (targetRadius - currentRadius) * 0.1;
+            currentVelocity += (targetVelocity - currentVelocity) * 0.1;
+
+            material.uniforms.uTime.value = t;
+            material.uniforms.uRadius.value = currentRadius;
+            material.uniforms.uVelocity.value = currentVelocity;
+            material.uniforms.uHand1.value.lerp(hand1Target, 0.2);
+            material.uniforms.uHand2.value.lerp(hand2Target, 0.2);
+
+            const currentH1 = material.uniforms.uHand1.value;
+            const currentH2 = material.uniforms.uHand2.value;
+            const midX = (currentH1.x + currentH2.x) / 2;
+            const midY = (currentH1.y + currentH2.y) / 2;
+
+            const aspect = window.innerWidth / window.innerHeight;
+            hologramGroup.position.set((midX * 2 - 1) * aspect, (midY * 2 - 1), 0);
+
+            outerRing.rotation.z = t * 0.5;
+            innerRing.rotation.y = t * 0.8;
+            innerRing.rotation.x = Math.PI / 2 + Math.sin(t * 0.5) * 0.3;
+            coreGem.rotation.x = t;
+            coreGem.rotation.y = t * 1.2;
+
+            const scaleBase = Math.max(0, currentRadius * 4.0);
+            hologramGroup.scale.set(scaleBase, scaleBase, scaleBase);
+            hologramGroup.visible = currentRadius > 0.02;
+
+            composer.render();
+        }
+
+        animate();
+
+        window.addEventListener("resize", () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            camera.left = -w/h;
+            camera.right = w/h;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(w, h);
+            composer.setSize(w, h);
+            material.uniforms.uResolution.value.set(w, h);
+        });
+
+    </script>
+</body>
+</html>
+<!-- portal -->

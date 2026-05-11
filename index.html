@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Experimental HTML Projects</title>
+  <style>
+    :root {
+      --bg-1: #0b1020;
+      --bg-2: #111a33;
+      --card: rgba(255, 255, 255, 0.08);
+      --text: #e7ecff;
+      --muted: #a9b4d0;
+      --accent: #7ee787;
+      --border: rgba(255, 255, 255, 0.15);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1f2d5f 0%, transparent 60%),
+        radial-gradient(900px 500px at 90% 110%, #1a5f4b 0%, transparent 60%),
+        linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      padding: 32px 20px 48px;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(1.8rem, 2vw + 1.2rem, 3rem);
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 1.03rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 14px;
+      padding: 18px;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+      backdrop-filter: blur(4px);
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 1.2rem;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Experimental HTML Projects</h1>
+    <p class="subtitle">Fun single-file experiments in interaction, graphics, and webcam-based effects.</p>
+
+    <section class="grid" aria-label="Project list">
+      <a class="card" href="./projects/burst/" target="_blank" rel="noopener noreferrer">
+        <h2>Burst</h2>
+        <p>Hand-tracking particles with constellation lines and fist-driven geometry mode.</p>
+      </a>
+
+      <a class="card" href="./projects/hidden-image/" target="_blank" rel="noopener noreferrer">
+        <h2>Hidden Image</h2>
+        <p>Camera motion distorts a liquid field to reveal hidden visuals.</p>
+      </a>
+
+      <a class="card" href="./projects/liquid/" target="_blank" rel="noopener noreferrer">
+        <h2>Liquid</h2>
+        <p>Fluid mirror simulation driven by realtime webcam movement.</p>
+      </a>
+
+      <a class="card" href="./projects/tear/" target="_blank" rel="noopener noreferrer">
+        <h2>Tear</h2>
+        <p>A two-hand portal experiment with bloom and gesture-controlled opening.</p>
+      </a>
+    </section>
+
+    <footer>Tip: allow camera access for projects that use webcam input.</footer>
+  </main>
+</body>
+</html>

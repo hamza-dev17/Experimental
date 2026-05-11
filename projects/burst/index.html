@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Hand Tracking Generative Art</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .video-element { display: none; } /* Hide the actual webcam feed */
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.2rem; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading AI Hand Tracking... Please allow webcam access.</div>
+    <video class="video-element" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const videoElement = document.querySelector('.video-element');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const loadingText = document.getElementById('loading');
+
+        let width, height;
+        let handPosition = { x: -1000, y: -1000 };
+        let isFist = false;
+        let particles = [];
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.color = Math.random() > 0.5 ? '#00ffff' : '#adff2f';
+            }
+            update() {
+                if (isFist) {
+                    const dx = handPosition.x - this.x;
+                    const dy = handPosition.y - this.y;
+                    this.vx += dx * 0.005;
+                    this.vy += dy * 0.005;
+                    this.vx *= 0.9;
+                    this.vy *= 0.9;
+                } else {
+                    const dx = this.x - handPosition.x;
+                    const dy = this.y - handPosition.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 200) {
+                        this.vx += (dx / dist) * 0.5;
+                        this.vy += (dy / dist) * 0.5;
+                    }
+                    this.vx *= 0.98;
+                    this.vy *= 0.98;
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                if (this.x < 0 || this.x > width) this.vx *= -1;
+                if (this.y < 0 || this.y > height) this.vy *= -1;
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        for (let i = 0; i < 150; i++) particles.push(new Particle());
+
+        let angle = 0;
+        function animate() {
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)';
+            ctx.fillRect(0, 0, width, height);
+
+            particles.forEach(p => { p.update(); p.draw(); });
+
+            if (!isFist) {
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < particles.length; i++) {
+                    for (let j = i + 1; j < particles.length; j++) {
+                        const dx = particles[i].x - particles[j].x;
+                        const dy = particles[i].y - particles[j].y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist < 100) {
+                            ctx.beginPath();
+                            ctx.moveTo(particles[i].x, particles[i].y);
+                            ctx.lineTo(particles[j].x, particles[j].y);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            } else {
+                angle += 0.05;
+                ctx.save();
+                ctx.translate(handPosition.x, handPosition.y);
+                ctx.rotate(angle);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(-50, -50, 100, 100);
+                ctx.rotate(-angle * 1.5);
+                ctx.strokeStyle = '#adff2f';
+                ctx.strokeRect(-30, -30, 60, 60);
+                ctx.restore();
+            }
+
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults((results) => {
+            loadingText.style.display = 'none';
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                handPosition.x = (1 - landmarks[9].x) * width;
+                handPosition.y = landmarks[9].y * height;
+
+                const wrist = landmarks[0];
+                const indexTip = landmarks[8];
+                const middleTip = landmarks[12];
+                const distIndex = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y);
+                const distMiddle = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y);
+
+                isFist = distIndex < 0.2 && distMiddle < 0.2;
+            }
+        });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>

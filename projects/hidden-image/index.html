@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Mirror - Hidden Reveal</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; font-family: sans-serif; pointer-events: none; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        h1 { margin: 0; font-weight: 300; letter-spacing: 2px; }
+        p { color: #aaa; }
+        video { display: none; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>LIQUID REVEAL</h1>
+        <p>Wipe the screen to reveal what lies beneath.</p>
+    </div>
+
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const renderTargetParams = {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.HalfFloatType,
+            depthBuffer: false,
+            stencilBuffer: false
+        };
+
+        let targetA = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, renderTargetParams);
+        let targetB = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, renderTargetParams);
+        let prevVideoTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, renderTargetParams);
+
+        const textureLoader = new THREE.TextureLoader();
+        const hiddenTexture = textureLoader.load('https://images.unsplash.com/photo-1534447677768-be436bb09401?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');
+
+        const video = document.getElementById('webcam');
+        let videoTexture = new THREE.VideoTexture(video);
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+        videoTexture.format = THREE.RGBFormat;
+
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+            .then(stream => { video.srcObject = stream; video.play(); })
+            .catch(err => console.error("Webcam error:", err));
+
+        const simMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                tFluid: { value: null },
+                tVideo: { value: null },
+                tPrevVideo: { value: null },
+                uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                uTime: { value: 0.0 }
+            },
+            vertexShader: ` varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); } `,
+            fragmentShader: `
+                uniform sampler2D tFluid;
+                uniform sampler2D tVideo;
+                uniform sampler2D tPrevVideo;
+                uniform vec2 uResolution;
+                uniform float uTime;
+                varying vec2 vUv;
+
+                void main() {
+                    vec2 pixel = 1.0 / uResolution;
+                    vec2 camUv = vec2(1.0 - vUv.x, vUv.y);
+
+                    vec3 camColor = texture2D(tVideo, camUv).rgb;
+                    vec3 prevCamColor = texture2D(tPrevVideo, camUv).rgb;
+
+                    float motion = distance(camColor, prevCamColor);
+                    motion = smoothstep(0.08, 0.25, motion);
+
+                    float left  = texture2D(tFluid, vUv + vec2(-pixel.x * 2.0, 0.0)).g;
+                    float right = texture2D(tFluid, vUv + vec2(pixel.x * 2.0, 0.0)).g;
+                    float up    = texture2D(tFluid, vUv + vec2(0.0, pixel.y * 2.0)).g;
+                    float down  = texture2D(tFluid, vUv + vec2(0.0, -pixel.y * 2.0)).g;
+
+                    vec2 velocity = vec2(left - right, down - up);
+                    vec4 fluid = texture2D(tFluid, vUv - velocity * pixel * 4.0);
+
+                    fluid.rgb *= 0.95;
+
+                    if (motion > 0.0) {
+                        vec3 neon = vec3(
+                            0.5 + 0.5 * sin(uTime * 3.0),
+                            0.5 + 0.5 * cos(uTime * 2.0),
+                            1.0
+                        );
+                        fluid.rgb += neon * motion * 0.6;
+                    }
+
+                    gl_FragColor = vec4(clamp(fluid.rgb, 0.0, 1.0), 1.0);
+                }
+            `
+        });
+
+        const displayMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                tFluid: { value: null },
+                tImage: { value: hiddenTexture }
+            },
+            vertexShader: ` varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); } `,
+            fragmentShader: `
+                uniform sampler2D tFluid;
+                uniform sampler2D tImage;
+                varying vec2 vUv;
+
+                void main() {
+                    vec4 fluidColor = texture2D(tFluid, vUv);
+                    float fluidIntensity = dot(fluidColor.rgb, vec3(0.299, 0.587, 0.114));
+                    vec2 distortedUv = vUv + (fluidColor.rg - 0.5) * fluidIntensity * 0.2;
+                    vec4 bgImage = texture2D(tImage, distortedUv);
+                    vec3 finalColor = mix(vec3(0.02, 0.02, 0.04), bgImage.rgb, fluidIntensity * 2.5);
+                    finalColor += fluidColor.rgb * 0.3;
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `
+        });
+
+        const geometry = new THREE.PlaneGeometry(2, 2);
+        const simMesh = new THREE.Mesh(geometry, simMaterial);
+        const displayMesh = new THREE.Mesh(geometry, displayMaterial);
+
+        scene.add(simMesh);
+        scene.add(displayMesh);
+
+        const videoScene = new THREE.Scene();
+        const videoMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: videoTexture }));
+        videoScene.add(videoMesh);
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+                videoTexture.needsUpdate = true;
+            }
+
+            simMaterial.uniforms.uTime.value = clock.getElapsedTime();
+            simMaterial.uniforms.tFluid.value = targetA.texture;
+            simMaterial.uniforms.tVideo.value = videoTexture;
+            simMaterial.uniforms.tPrevVideo.value = prevVideoTarget.texture;
+
+            simMesh.visible = true;
+            displayMesh.visible = false;
+            renderer.setRenderTarget(targetB);
+            renderer.render(scene, camera);
+
+            simMesh.visible = false;
+            displayMesh.visible = true;
+            displayMaterial.uniforms.tFluid.value = targetB.texture;
+            renderer.setRenderTarget(null);
+            renderer.render(scene, camera);
+
+            let temp = targetA;
+            targetA = targetB;
+            targetB = temp;
+
+            renderer.setRenderTarget(prevVideoTarget);
+            renderer.render(videoScene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            renderer.setSize(w, h);
+            targetA.setSize(w, h);
+            targetB.setSize(w, h);
+            prevVideoTarget.setSize(w, h);
+            simMaterial.uniforms.uResolution.value.set(w, h);
+        });
+    </script>
+</body>
+</html>
