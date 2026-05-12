@@ -2,18 +2,6 @@
 
 A collection of fun, experimental, single-file HTML projects focused on visuals, interaction, and realtime effects.
 
-## Live Demo
-
-After enabling GitHub Pages for this repository, the gallery home page will be available at:
-
-`https://hamza-dev17.github.io/Experimental/`
-
-Each project will be available under:
-
-- `https://hamza-dev17.github.io/Experimental/projects/burst/`
-- `https://hamza-dev17.github.io/Experimental/projects/hidden-image/`
-- `https://hamza-dev17.github.io/Experimental/projects/liquid/`
-- `https://hamza-dev17.github.io/Experimental/projects/tear/`
 
 ## Projects
 
