@@ -1,0 +1,113 @@
+name: FX Replay management simulation
+
+on:
+  push:
+    branches: [fxreplay-simulation-final]
+    paths:
+      - fxreplay/analytics.csv
+      - fxreplay/simulate.py
+      - .github/workflows/fxreplay-management.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - fxreplay/analytics.csv
+      - fxreplay/simulate.py
+      - .github/workflows/fxreplay-management.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out analysis branch
+        uses: actions/checkout@v4
+        with:
+          ref: fxreplay-simulation-final
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install analysis dependencies
+        run: python -m pip install --upgrade pandas numpy
+
+      - name: Download public XAUUSD tick files needed by the trades
+        shell: bash
+        run: |
+          mkdir -p marketdata/XAUUSD_csv
+          python - <<'PY'
+          from pathlib import Path
+          import time
+          import urllib.error
+          import urllib.request
+          import pandas as pd
+
+          trades = pd.read_csv('fxreplay/analytics.csv')
+          for col in ['dateStart', 'dateEnd']:
+              trades[col] = pd.to_datetime(trades[col], errors='coerce')
+          dates = set()
+          for row in trades.itertuples():
+              start = row.dateStart
+              end = row.dateEnd if pd.notna(row.dateEnd) else start
+              if pd.isna(start):
+                  continue
+              for day in pd.date_range(start.normalize() - pd.Timedelta(days=2), end.normalize() + pd.Timedelta(days=2)):
+                  dates.add(day.strftime('%Y-%m-%d'))
+
+          base = 'https://raw.githubusercontent.com/noobshow/ai-trading-simulator-data/1e60ef7b92fd79aa467d66b85a5ca590cea9e59e/XAUUSD_csv'
+          out = Path('marketdata/XAUUSD_csv')
+          downloaded = 0
+          missing = 0
+          for i, day in enumerate(sorted(dates), 1):
+              target = out / f'{day}.csv.gz'
+              url = f'{base}/{day}.csv.gz'
+              for attempt in range(3):
+                  try:
+                      urllib.request.urlretrieve(url, target)
+                      downloaded += 1
+                      break
+                  except urllib.error.HTTPError as exc:
+                      if exc.code == 404:
+                          missing += 1
+                          break
+                      if attempt == 2:
+                          raise
+                      time.sleep(2 ** attempt)
+                  except Exception:
+                      if attempt == 2:
+                          raise
+                      time.sleep(2 ** attempt)
+              if i % 10 == 0:
+                  print(f'Checked {i}/{len(dates)} dates; downloaded={downloaded}, missing={missing}', flush=True)
+          print(f'Finished: downloaded={downloaded}, missing={missing}, requested={len(dates)}')
+          if downloaded == 0:
+              raise SystemExit('No market-data files downloaded')
+          PY
+          find marketdata/XAUUSD_csv -maxdepth 1 -type f | head
+
+      - name: Run breakeven and partial-profit simulations
+        env:
+          MARKET_DATA_DIR: ${{ github.workspace }}/marketdata
+        run: python fxreplay/simulate.py
+
+      - name: Upload result files
+        uses: actions/upload-artifact@v4
+        with:
+          name: fxreplay-management-results
+          path: fxreplay/results
+          if-no-files-found: error
+
+      - name: Commit results to analysis branch
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add fxreplay/results
+          git commit -m "Add FX Replay management simulation results" || exit 0
+          git push origin HEAD:fxreplay-simulation-final
