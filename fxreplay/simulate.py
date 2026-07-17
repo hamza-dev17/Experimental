@@ -80,18 +80,26 @@ def nearest(ticks,tt,col='mid'):
  b=pd.merge_asof(a,ticks[['ts',col]],left_on='target',right_on='ts',direction='nearest',tolerance=pd.Timedelta('10min'))
  return b.sort_values('_i')[col].to_numpy()
 
+def offset_scores(t,s,scale,scope):
+ rows=[]
+ for off in range(-720,721,30):
+  tt=s.dateStart.dt.tz_localize('UTC')-pd.to_timedelta(off,unit='m'); v=nearest(t,tt)*scale; ok=np.isfinite(v)
+  if ok.sum()<max(2,len(s)//2): continue
+  e=np.abs(v[ok]-s.loc[ok,'entryPrice'].to_numpy())
+  rows.append((scope,np.median(e),np.mean(e),np.quantile(e,.95),scale,off,int(ok.sum())))
+ return rows
+
 def calibrate(t,d):
- c=[]; s=d[(d.status=='closed')&d.dateStart.notna()&d.entryPrice.notna()]
- for scale in [1,.1,.01,.001,10,100]:
-  for off in range(-720,721,30):
-   tt=s.dateStart.dt.tz_localize('UTC')-pd.to_timedelta(off,unit='m'); v=nearest(t,tt)*scale; ok=np.isfinite(v)
-   if ok.sum()<max(5,len(s)//2): continue
-   e=np.abs(v[ok]-s.loc[ok,'entryPrice'].to_numpy())
-   c.append((np.median(e),np.mean(e),np.quantile(e,.95),scale,off,int(ok.sum())))
- if not c: raise RuntimeError('calibration failed')
- c.sort(); best=c[0]
- pd.DataFrame(c,columns=['median_error','mean_error','p95_error','scale','offset_minutes','n']).to_csv(OUT/'calibration.csv',index=False)
- return best[3],best[4]
+ s=d[(d.status=='closed')&d.dateStart.notna()&d.entryPrice.notna()].copy(); allrows=[]
+ for scale in [1,.1,.01,.001,10,100]: allrows+=offset_scores(t,s,scale,'global')
+ if not allrows: raise RuntimeError('calibration failed')
+ allrows.sort(key=lambda x:(x[1],x[2],x[3])); best=allrows[0]; scale,global_off=best[4],best[5]
+ month_offsets={}
+ for month,g in s.groupby(s.dateStart.dt.to_period('M')):
+  r=offset_scores(t,g,scale,str(month)); allrows+=r
+  if r: month_offsets[str(month)]=min(r,key=lambda x:(x[1],x[2],x[3]))[5]
+ pd.DataFrame(allrows,columns=['scope','median_error','mean_error','p95_error','scale','offset_minutes','n']).to_csv(OUT/'calibration.csv',index=False)
+ return scale,global_off,month_offsets
 
 def path(row,ticks,off):
  st=pd.Timestamp(row.dateStart,tz='UTC')-pd.Timedelta(minutes=off); en=pd.Timestamp(row.dateEnd,tz='UTC')-pd.Timedelta(minutes=off)
@@ -133,10 +141,10 @@ def scenarios(det,high=False):
  return pd.DataFrame(rows)
 
 def main():
- d=trades(); ticks,schema=load_ticks(needed(d)); scale,off=calibrate(ticks,d); ticks[['bid','ask','mid']]*=scale
+ d=trades(); ticks,schema=load_ticks(needed(d)); scale,off,month_offsets=calibrate(ticks,d); ticks[['bid','ask','mid']]*=scale
  rows=[]
  for _,r in d[d.status=='closed'].iterrows():
-  x=path(r,ticks,off); z={'id':r.id,'dateStart':r.dateStart,'dateEnd':r.dateEnd,'side':r.side,'entryPrice':r.entryPrice,'initialSL':r.initalSL,'avgClosePrice':r.avgClosePrice,'baseline_r':r.avgRiskReward,'rPnL':r.rPnL}; z.update(x)
+  trade_off=month_offsets.get(str(r.dateStart.to_period('M')),off); x=path(r,ticks,trade_off); z={'id':r.id,'dateStart':r.dateStart,'dateEnd':r.dateEnd,'side':r.side,'entryPrice':r.entryPrice,'initialSL':r.initalSL,'avgClosePrice':r.avgClosePrice,'baseline_r':r.avgRiskReward,'rPnL':r.rPnL}; z.update(x)
   for lv in BE:
    z.setdefault(f'hit_{lv:g}r',False);z.setdefault(f'return_{lv:g}r',False)
   rows.append(z)
@@ -146,10 +154,10 @@ def main():
  for name,w in [('losses',det[det.matched&(det.baseline_r<-.05)]),('winners',det[det.matched&(det.baseline_r>.05)]),('all',det[det.matched])]:
   for lv in BE:dist.append({'group':name,'rr_level':lv,'trades':len(w),'reached':int(w[f'hit_{lv:g}r'].sum()),'returned_to_entry':int(w[f'return_{lv:g}r'].sum())})
  det.to_csv(OUT/'trade_path_analysis.csv',index=False);summ.to_csv(OUT/'scenario_summary.csv',index=False);pd.DataFrame(dist).to_csv(OUT/'mfe_distribution.csv',index=False)
- q={'source':'noobshow/ai-trading-simulator-data','source_commit':'1e60ef7b92fd79aa467d66b85a5ca590cea9e59e','schema':schema,'scale':scale,'fxreplay_offset_minutes_from_utc':off,'ticks':len(ticks),'closed_trades':len(det),'matched':int(det.matched.sum()),'high_confidence':int(det.high_confidence.sum()),'median_exit_error_r':float(det.loc[det.matched,'exit_move_error_r'].median()),'p90_exit_error_r':float(det.loc[det.matched,'exit_move_error_r'].quantile(.9))}
+ q={'source':'noobshow/ai-trading-simulator-data','source_commit':'1e60ef7b92fd79aa467d66b85a5ca590cea9e59e','schema':schema,'scale':scale,'global_fxreplay_offset_minutes_from_utc':off,'monthly_offsets_minutes_from_utc':month_offsets,'ticks':len(ticks),'closed_trades':len(det),'matched':int(det.matched.sum()),'high_confidence':int(det.high_confidence.sum()),'median_exit_error_r':float(det.loc[det.matched,'exit_move_error_r'].median()),'p90_exit_error_r':float(det.loc[det.matched,'exit_move_error_r'].quantile(.9))}
  (OUT/'data_quality.json').write_text(json.dumps(q,indent=2))
  rank=a.sort_values(['expectancy_r','max_drawdown_r'],ascending=[False,True]); lines=[]
  for _,r in rank.head(15).iterrows():lines.append(f"| {r.scenario} | {r.total_r:.2f} | {r.expectancy_r:.3f} | {r.profit_factor:.2f} | {r.max_drawdown_r:.2f} | {int(r.losses_saved)} | {int(r.baseline_winners_reduced)} |")
- report=f'''# FX Replay management simulation\n\nMatched **{q['matched']} / {q['closed_trades']}** closed trades. High-confidence exit-path matches: **{q['high_confidence']}**. Calibrated timestamp offset: **UTC{off/60:+g}**. Median exit-path mismatch: **{q['median_exit_error_r']:.3f}R**.\n\nPublic XAUUSD tick data is not the exact OANDA feed. Each path is anchored to the public quote at the FX Replay entry time, and low-confidence mismatches are flagged.\n\n| Scenario | Total R | Expectancy | Profit factor | Max DD | Losses saved | Winners reduced |\n|---|---:|---:|---:|---:|---:|---:|\n{chr(10).join(lines)}\n\nTested BE at **0.5R, 1R, 1.5R, 2R, 3R and 5R**. Tested **20%, 25% and 50% partials at 2R, 3R and 5R**, both partial-only and partial-plus-BE. Full results are in `scenario_summary.csv`; trade-level paths are in `trade_path_analysis.csv`.\n'''
+ report=f'''# FX Replay management simulation\n\nMatched **{q['matched']} / {q['closed_trades']}** closed trades. High-confidence exit-path matches: **{q['high_confidence']}**. Global timestamp offset: **UTC{off/60:+g}**; monthly offsets were used trade-by-trade. Median exit-path mismatch: **{q['median_exit_error_r']:.3f}R**.\n\nPublic XAUUSD tick data is not the exact OANDA feed. Each path is anchored to the public quote at the FX Replay entry time, and low-confidence mismatches are flagged.\n\n| Scenario | Total R | Expectancy | Profit factor | Max DD | Losses saved | Winners reduced |\n|---|---:|---:|---:|---:|---:|---:|\n{chr(10).join(lines)}\n\nTested BE at **0.5R, 1R, 1.5R, 2R, 3R and 5R**. Tested **20%, 25% and 50% partials at 2R, 3R and 5R**, both partial-only and partial-plus-BE. Full results are in `scenario_summary.csv`; trade-level paths are in `trade_path_analysis.csv`.\n'''
  (OUT/'REPORT.md').write_text(report);print(report)
 if __name__=='__main__':main()
