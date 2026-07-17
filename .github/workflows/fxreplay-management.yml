@@ -1,0 +1,65 @@
+name: FX Replay management simulation
+
+on:
+  push:
+    branches: [fxreplay-simulation-final]
+    paths:
+      - fxreplay/analytics.csv
+      - fxreplay/simulate.py
+      - .github/workflows/fxreplay-management.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out analysis branch
+        uses: actions/checkout@v4
+        with:
+          ref: fxreplay-simulation-final
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install analysis dependencies
+        run: python -m pip install --upgrade pandas numpy
+
+      - name: Fetch public XAUUSD tick history
+        shell: bash
+        run: |
+          rm -rf marketdata
+          git init marketdata
+          git -C marketdata remote add origin https://github.com/noobshow/ai-trading-simulator-data.git
+          git -C marketdata sparse-checkout init --cone
+          git -C marketdata sparse-checkout set XAUUSD_csv
+          git -C marketdata fetch --depth 1 origin 1e60ef7b92fd79aa467d66b85a5ca590cea9e59e
+          git -C marketdata checkout --detach FETCH_HEAD
+          find marketdata/XAUUSD_csv -maxdepth 1 -type f | head
+
+      - name: Run breakeven and partial-profit simulations
+        env:
+          MARKET_DATA_DIR: ${{ github.workspace }}/marketdata
+        run: python fxreplay/simulate.py
+
+      - name: Upload result files
+        uses: actions/upload-artifact@v4
+        with:
+          name: fxreplay-management-results
+          path: fxreplay/results
+          if-no-files-found: error
+
+      - name: Commit results to analysis branch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add fxreplay/results
+          git commit -m "Add FX Replay management simulation results" || exit 0
+          git push origin HEAD:fxreplay-simulation-final
