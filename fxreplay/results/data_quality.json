@@ -8,11 +8,18 @@
     "price": "last"
   },
   "scale": 1,
-  "fxreplay_offset_minutes_from_utc": -180,
+  "global_fxreplay_offset_minutes_from_utc": -180,
+  "monthly_offsets_minutes_from_utc": {
+    "2025-01": -120,
+    "2025-02": -120,
+    "2025-03": -180,
+    "2025-04": -180,
+    "2025-05": -180
+  },
   "ticks": 15626551,
   "closed_trades": 55,
   "matched": 55,
-  "high_confidence": 36,
-  "median_exit_error_r": 0.1594366616989125,
-  "p90_exit_error_r": 1.347462508367135
+  "high_confidence": 48,
+  "median_exit_error_r": 0.09554155697635305,
+  "p90_exit_error_r": 0.567108872806712
 }
