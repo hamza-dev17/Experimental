@@ -40,12 +40,8 @@ jobs:
         shell: bash
         run: |
           rm -rf marketdata
-          git init marketdata
-          git -C marketdata remote add origin https://github.com/noobshow/ai-trading-simulator-data.git
-          git -C marketdata sparse-checkout init --cone
-          git -C marketdata sparse-checkout set XAUUSD_csv
-          git -C marketdata fetch --depth 1 origin 1e60ef7b92fd79aa467d66b85a5ca590cea9e59e
-          git -C marketdata checkout --detach FETCH_HEAD
+          git clone --depth 1 https://github.com/noobshow/ai-trading-simulator-data.git marketdata
+          test -d marketdata/XAUUSD_csv
           find marketdata/XAUUSD_csv -maxdepth 1 -type f | head
 
       - name: Run breakeven and partial-profit simulations
